@@ -11,7 +11,9 @@ This was part of a "DREAM" challenge hosted by Synapse. I worked on this group w
 
 # 2. Drug Repurposing Success Prediciton. 
 Using xgboost and available data from a previous study https://www.nature.com/articles/s41598-019-42806-6#data-availability, I beat the original reports AUC using XGBoost. This means my model had better predictive ability for picking drugs that would be succesfully repurposed.
+- Beat previous authors AUC of 0.922 by implementing XGBoost instead of Random Forest
 
 # 3. Protein Translational Efficiency 
 Using xgboost I made a predictive model for translational efficiency of eventual proteins based on their nucleotide and amino acid sequences as well as the physical characteristics of those molecules such as hydrophobicity, molecular weight, rareness of codons, RNA folding energy, and charge. The proteins were given a score (protein expression level) based on experimental work found in this article https://www.nature.com/articles/s41467-019-13810-1#Sec23. I tried to predict that score (protein level) using my previously described input variables.
+- Attained RMSE of 0.6 when predicting a range of protein expression scored 1 through 5.
 
