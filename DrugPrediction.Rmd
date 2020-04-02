@@ -1,0 +1,193 @@
+---
+title: "Using XGBoost to predict Successful Drug Repurposing Candidates"
+author: "James Young"
+date: "3/14/2020"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r echo=FALSE, message=FALSE }
+library(xgboost)
+library(Matrix)
+library(caret)
+```
+
+
+
+
+
+## The Problem
+
+A recent paper tried to make a model that could predict succesful candidates for drug repurposing https://www.nature.com/articles/s41598-019-42806-6#data-availability. They incorporated new predictor variables by scraping the literature for semantic relations between drugs, diseases, etc. The data is available here https://github.com/Wytz/Drug_repurposing. I wanted to see if I could achieve better results than their .922 AUC (a metric of model performance in unbalanced classification data). They used a random forest and I will use the newer xgboost framework. 
+
+## The Value
+
+If a company can more accurately predict which drugs have a better chance of being successfully repurposed, they can save money and time. For individuals needing new drugs, this would hopefully mean they could get drugs sooner and more affordably as well.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE )
+```
+
+## Read The Data In
+
+First I will pull the data into R and change all of the categorical data to one-hot encoded dummy variables. We can see we have ~8,000 drugs and ~1,835 columns of data. The one hot encoded categorical variables account for many of these columns, which can be reffered to as sparse data. Modern machine learning algorithms such as xgboost can handle this sparse data better than classic approaches such as linear regression. The xgboost model will limit the effect of less important variables by using them in less trees of the underlying ensemble. The xgboost effectively does feature selection while building the model.
+
+```{r}
+setwd("C://data/")
+x <- read.csv("DrugRepurposing.csv", stringsAsFactors = T)
+x2 <- predict(dummyVars(~ disease_id, data = x), newdata = x)
+x <- as.data.frame(cbind(x2, x))
+cat("Rows of Data")
+nrow(x)
+cat("Columns of Data")
+ncol(x)
+```
+
+## Split The Data 90/10
+
+I have split the data into train/test groups to see the generalization of the model using a 90/10 split.With approximately 8,000 samples to split, this means we will validate on about 800 samples. This is the same split as the cross validation used in the paper. Later on I Will proved a cross validation as well.
+
+```{r}
+set.seed(1234)
+#We will get rid of the two character based features below before splitting the data. Character based features do not work in xgboost. There are ways to try to retain the information of the features for xgboost but that is for another day.
+x$disease_id <- NULL
+x$drug_id <- NULL
+sample <- sample.int(n = nrow(x), size = floor(.90*nrow(x)), replace = F)
+train <- x[sample, ]
+test  <- x[-sample, ]
+```
+
+
+
+
+
+## Preparing The Data
+
+Here I will prepare the data into a matrix of predictor variables and a vector of labels. The labels are binary (1 and 0) with representing a successfully repurposed drug and 0 representing failure.
+
+```{r}
+
+
+labels <- as.numeric(train$Status)
+ts_label <- as.numeric(test$Status)
+
+#Below, by limiting our predictor variable matrix to 1:1832, we make sure we don't leave the response variable in.
+
+new_tr <- as.matrix(train[,1:1832]) 
+new_ts <- as.matrix(test[,1:1832])
+labels <- as.numeric(labels-1)
+ts_label <- as.numeric(ts_label-1)
+dtrain <- xgb.DMatrix(data = new_tr,label = labels) 
+dtest <- xgb.DMatrix(data = new_ts,label=ts_label)
+```
+
+
+```{r}
+#default parameters
+params <- list(booster = "gbtree", objective = "binary:logistic", eta=0.1, gamma=1, max_depth=7, min_child_weight=1, subsample=1, colsample_bytree=1)
+```
+
+```{r}
+set.seed(123)
+xgb1 <- xgb.train (params = params, data = dtrain, nrounds = 150, watchlist = list(val=dtest,train=dtrain), print.every.n = 10, early.stop.round = 100, maximize = T , eval_metric = "auc")
+```
+
+
+## Visualize Model Generalization and Skill
+
+Below we can see the ROC plot of the train and test data. An AUC near 1 is better, an AUC near 0 represents a model with no skill. We want to see both the train and test have relatively similar AUC's to show the model generalizes well, and we also want as high of a test AUC as possible.
+
+
+```{r}
+library(ROCR)
+library(pROC)
+set.seed(1234)
+sample <- sample.int(n = nrow(x), size = floor(.90*nrow(x)), replace = F)
+train <- x[sample, ]
+test  <- x[-sample, ]
+p2 <- predict(xgb1, dtrain, type = 'prob')
+p2 <- as.numeric(p2)
+
+p3 <- predict(xgb1, dtest, type = 'response')
+p3 <- as.numeric(p3)
+
+
+pred1 <- prediction(p2, train$Status)
+roc.perf = ROCR::performance(pred1, measure = "tpr", x.measure = "fpr")
+
+pred2 <- prediction(p3, test$Status)
+roc.perf2 = ROCR::performance(pred2, measure = "tpr", x.measure = "fpr")
+
+plot(roc.perf,col='red', lty=1, lwd=3, main = "XGBoost Model")
+abline(a=0, b= 1)
+
+plot(roc.perf2, add=TRUE, lty=1, lwd=3)
+#roc.perf
+
+
+auctest <- ROCR::performance(pred2,"auc")
+auctrain <- ROCR::performance(pred1,"auc")
+# now converting S4 class to vector
+auctest <- unlist(slot(auctest, "y.values"))
+auctrain <- unlist(slot(auctrain, "y.values"))
+# adding min and max ROC AUC to the center of the plot
+auctest<-mean(round(auctest, digits = 3))
+auctrain<-mean(round(auctrain, digits = 3))
+minauct <- paste(c("Train (AUC)  = "), auctrain,sep="")
+maxauct <- paste(c("Test (AUC) = "),auctest,sep="")
+legend(0.62,0.6,c(maxauct),cex=1.2,box.col = "white", text.col = "black")
+legend(0.61,0.4,c(minauct),cex=1.2,box.col = "white", text.col = "red")
+```
+
+## Visualizaing Important Variables
+
+
+Here you can see how frequently different variables are used in the trees of the xgboost model, suggesting they are important variables. While it is common place to regard some machine learning models as hard to interpret, xgboost actually has a nice waterfall plot that can show how variables played into any given prediction. I will add that at a later date but the intstructional can be found here https://stats.stackexchange.com/questions/342090/xgboostexplainer-intercept-and-xgboost-parameters.
+
+```{r}
+xgb.importance(colnames(train, do.NULL = TRUE, prefix = "col"), model = xgb1)
+```
+
+
+
+
+
+
+## 10 Fold Cross Validation
+
+For the 10 fold cross validation, the validation will test 10 different chunks of 10% of the data with the other 90% being the train data. This will happen for each round of training. This is more computationally intense but can give a better idea of how well the model generalizes.I have limited the training rounds here due to the time it takes.
+
+```{r}
+
+labels <- as.numeric(x$Status)
+#Below, by limiting our predictor variable matrix to 1:1832, I make sure I don't leave the response variable in.
+
+new_tr <- as.matrix(x[,1:1832]) 
+
+labels <- as.numeric(labels-1)
+
+dall <- xgb.DMatrix(data = new_tr,label = labels) 
+```
+
+
+
+```{r}
+set.seed(123)
+xgbcv <- xgb.cv( params = params, data = dall, nrounds = 100, nfold = 10, showsd = T, stratified = T, print.every.n = 10, early.stop.round = 20, maximize = T, eval_metric = "auc")
+```
+
+
+
+## Conclusions (Thus Far)
+
+Building this xgboost model has shown that it can beat the previous AUC of 0.922. Moving forward I will also supply a gains table and lift chart as I have in other projects to quantify how much an improvement of random chance the highest scoring buckets provide. I have done this in other projects available such as https://github.com/jamesyoung93/StatisticalProgrammingClasses/tree/Predictive-Analytics-I. 
+
+
+
+
+
+
+
