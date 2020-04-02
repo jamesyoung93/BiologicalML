@@ -1,0 +1,283 @@
+---
+title: "Protein Production Prediction"
+author: "James Young"
+date: "2/13/2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## The Problem and The Value
+
+Increasing protein titres in production has important implications for metabolic engineering, food production, and therapeutic peptide/protein production. However, manipulating protein expression levels can be very challenging because of their multi-tier regulation.
+
+## The Approach
+
+Using xgboost I made a predictive model for translational efficiency of eventual proteins based on their nucleotide and amino acid sequences as well as the physical characteristics of those molecules such as hydrophobicity, molecular weight, rareness of codons, RNA folding energy, and charge. The proteins were given a score (protein expression level) based on experimental work found in this article https://www.nature.com/articles/s41467-019-13810-1#Sec23. I tried to predict that score (protein level) using my previously described input variables.
+
+## Prepare The Data
+
+First I will read in the data and split the nucleotide and amino acid sequences into separate columns. 
+
+
+```{r}
+x <- read.csv("Proteins.csv")
+```
+
+```{r}
+library(data.table)
+fixed_split <- function(text, n) {
+  data.table::tstrsplit(text, paste0("(?<=.{",n,"})"), perl=TRUE)
+}
+x1 <- cbind(as.character(x$AA)) 
+x1 <- as.data.frame(x1)
+x1$V1 <- as.character(x1$V1)
+n <- 1
+new_vars <- ceiling(max(nchar(x1$V1)) / n)
+x1 <- setDT(x1)[, paste0("new_var", seq_len(new_vars)) := fixed_split(V1, n = n)][]
+
+
+```
+
+
+```{r}
+library(data.table)
+fixed_split <- function(text, n) {
+  data.table::tstrsplit(text, paste0("(?<=.{",n,"})"), perl=TRUE)
+}
+x02 <- cbind(as.character(x$DNA)) 
+x02 <- as.data.frame(x02)
+x02$V1 <- as.character(x02$V1)
+n <- 3
+new_vars <- ceiling(max(nchar(x02$V1)) / n)
+x02 <- setDT(x02)[, paste0("new_var", seq_len(new_vars)) := fixed_split(V1, n = n)][]
+
+
+```
+
+
+```{r}
+library(data.table)
+fixed_split <- function(text, n) {
+  data.table::tstrsplit(text, paste0("(?<=.{",n,"})"), perl=TRUE)
+}
+x4 <- cbind(as.character(x$DNA)) 
+x4 <- as.data.frame(x4)
+x4$V1 <- as.character(x4$V1)
+n <- 1
+new_vars <- ceiling(max(nchar(x4$V1)) / n)
+x4 <- setDT(x4)[, paste0("new_var", seq_len(new_vars)) := fixed_split(V1, n = n)][]
+
+
+```
+
+
+
+
+```{r}
+x2 <- cbind(x$tAI, x$nco, x$xho, x$RLI, x$Rare_3, x$Rare_2, x$RNAfold, x$charge, x$hydrophobicity, x$Score) 
+```
+
+```{r}
+x2 <- as.data.frame(x2)
+names(x2) <- c("tAI", "nco", "xho", "RLI", "Rare3", "Rare2", "RNAfold", "Charge", "hydrophob", "Score")
+x2$nco<- as.factor(x2$nco)
+x2$xho<- as.factor(x2$xho)
+x2$RLI<- as.factor(x2$RLI)
+x2$Rare3<- as.factor(x2$Rare3)
+x2$Rare2<- as.factor(x2$Rare2)
+```
+
+
+Here is further data prep and I am adding in additional information regarding the molecular weight of the amino acid coded for as well as hydrophobicity.
+
+
+```{r message=F}
+x1 <- as.data.frame(x1)
+x2 <- as.data.frame(x2)
+#x02 <- as.data.frame(x02)
+x4 <- as.data.frame(x4)
+x1 = setDT(x1, keep.rownames = TRUE)[]
+x2 = setDT(x2, keep.rownames = TRUE)[]
+x4 = setDT(x4, keep.rownames = TRUE)[]
+x3 <- merge(x1, x2, by="rn", all=TRUE)
+x3 <- merge(x4, x3, by="rn", all=TRUE)
+library(dplyr)
+x22 <- c(3,4,5)
+
+x3$new_var1.y <- as.factor(x3$new_var1.y)
+x3$new_var2.y <- as.factor(x3$new_var2.y)
+x3$new_var3.y <- as.factor(x3$new_var3.y)
+
+x1 <- as.data.frame(x1)
+x21 = x1
+
+for (i in x22) {x21[,i] <- (recode(as.character(x21[,i]), "A" = 89 , "C" = 121, "D"= 133, "E" = 147, "F" = 165, "G" = 75, "H" = 155, "I" = 131, "K" = 146, "L" = 131, "M" = 149, "N" = 132, "P" = 115, "Q" = 146, "R" = 174, "S" = 105, "T" = 119, "V" = 117, "W" = 204, "Y" = 181, "*" = 0))
+}
+
+x6 = x21
+x21 = x1
+
+for (i in x22) {x21[,i] <- (recode(as.character(x21[,i]), "A" = 1.8 , "C" = 2.5, "D"= -3.5, "E" = -3.5, "F" = 2.8, "G" = -0.4, "H" = -3.2, "I" = 4.5, "K" = -3.9, "L" = 3.8, "M" = 1.9, "N" = -3.5, "P" = -1.6, "Q" = -3.5, "R" = -4.5, "S" = -0.8, "T" = -0.7, "V" = 4.2, "W" = -0.9, "Y" = -1.3, "*" = -999))
+}
+x7 = x21
+
+x3 <- merge(x6, x3, by="rn", all=TRUE)
+x3 <- merge(x7, x3, by="rn", all=TRUE)
+```
+
+```{r}
+x3$rn <- NULL
+x3$V1.x <- NULL
+x3$V1.y<- NULL
+#x3$nco <- NULL
+#x3$xho <- NULL
+#x3$RNAfold <- NULL
+x3$V1.x <- NULL
+x3$V1.y<- NULL
+x3$V1.x <- NULL
+x3$V1.y<- NULL
+
+names(x3) <- c("hydro1", "hydro2", "hydro3", "MW1", "MW2", "MW3", "N1", "N2", "N3", "N4", "N5", "N6", "N7", "N8", "N9", "AA1", "AA2", "AA3", "tAI", "nco", "xho", "RLI", "Rare3", "Rare2", "RNAfold", "Charge", "hydrophob", "Score")
+```
+
+
+
+
+
+```{r}
+set.seed(12345)
+
+x2 = x3
+x2$N1 <- as.factor(x2$N1)
+x2$N2 <- as.factor(x2$N2)
+x2$N3 <- as.factor(x2$N3)
+x2$N4 <- as.factor(x2$N4)
+x2$N5 <- as.factor(x2$N5)
+x2$N6 <- as.factor(x2$N6)
+x2$N7 <- as.factor(x2$N7)
+x2$N8 <- as.factor(x2$N8)
+x2$N9 <- as.factor(x2$N9)
+
+sample <- sample.int(n = nrow(x2), size = floor(.7*nrow(x2)), replace = F)
+train <- x2[sample, ]
+test  <- x2[-sample, ]
+
+
+```
+
+
+## Split The Data 90/10
+I have split the data into train/test groups to see the generalization of the model using a 90/10 split. This means we will validate on about 17,000 samples. 
+
+
+
+
+```{r}
+# Load the Matrix package
+library(Matrix)
+set.seed(123)
+x2=x3
+x2 = na.omit(x2)
+x2$V1 <- NULL
+x2$nco <- NULL
+x2$xho <- NULL
+x2$rn <- NULL
+x2$V1.y <- NULL
+x2$V1.x <- NULL
+x2$Rare2 <- NULL
+x2$Rare3 <- NULL
+x2$tAI <- NULL
+x2$RLI <- NULL
+
+
+
+library(dplyr)
+
+x2=na.omit(x2)
+x2 = as.data.frame(x2)
+
+
+x2<- na.omit(x2)
+
+
+sample <- sample.int(n = nrow(x2), size = floor(.9*nrow(x2)), replace = F)
+train <- x2[sample, ]
+test  <- x2[-sample, ]
+
+# Create sparse matrixes and perform One-Hot Encoding to create dummy variables
+dtrain  <- sparse.model.matrix(Score ~ .-1, data=train)
+dtest   <- sparse.model.matrix(Score ~ .-1, data=test)
+dim(dtrain)
+dim(dtest)
+
+```
+
+
+
+```{r}
+library(xgboost)
+train.label <- train$Score
+test.label <- test$Score
+dtrain <- xgb.DMatrix(data = dtrain,label = train.label) 
+
+dtest <- xgb.DMatrix(data = dtest,label=test.label)
+```
+
+
+
+
+
+```{r}
+#default parameters
+params <- list(booster = "gbtree", objective = "reg:linear", eta=0.1, gamma=1, max_depth=9, min_child_weight=1, subsample=1, colsample_bytree=1)
+```
+
+
+
+```{r}
+set.seed(123)
+xgb1 <- xgb.train (params = params, data = dtrain, nrounds = 300, watchlist = list(val=dtest,train=dtrain), print.every.n = 20, early.stop.round = 10, maximize = F , eval_metric = "rmse")
+
+```
+
+
+## Visualizaing Important Variables
+Here you can see how frequently different variables are used in the trees of the xgboost model, suggesting they are important variables. While it is common place to regard some machine learning models as hard to interpret, xgboost actually has a nice waterfall plot that can show how variables played into any given prediction. I will add that at a later date but the intstructional can be found here https://stats.stackexchange.com/questions/342090/xgboostexplainer-intercept-and-xgboost-parameters.
+
+
+
+
+```{r}
+xgb.importance(colnames(dtrain, do.NULL = TRUE, prefix = "col"), model = xgb1)
+```
+
+
+## Visualize The Predictions
+
+Further below, we can see the predictions of the model for both train and test data. While there is variaition away from the true score, we can see these predictions do follow the trend line pretty well on average.
+
+
+```{r}
+pred <- as.data.frame(predict(xgb1, dtest, type = 'response'))
+pred2 <- as.data.frame(predict(xgb1, dtrain, type = 'response'))
+
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(pred2$`predict(xgb1, dtrain, type = "response")` ~ train.label, xlab="Observed", ylab ="Predicted", main = "Train Data")
+abline(a=0, b=1, col="red")
+plot(pred$`predict(xgb1, dtest, type = "response")` ~ test.label, xlab="Observed", ylab ="Predicted", main = "Test Data")
+abline(a=0, b=1, col="red")
+```
+
+
+## Conclusions (Thus Far)
+
+When attempting to increase the titre of proteins, it may be useful to consider the factors found to be important in this model. At a future date, I will interrogate the finer detail interactions of the variables, but the purpose of this project was to try to create a predictive model of protein production levels. From the RMSE of ~ 0.6 through a range of 1 to 5, I would say this model does a that fairly decently.
+
