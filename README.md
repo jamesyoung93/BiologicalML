@@ -3,11 +3,11 @@ Biological Machine Learning
 
 There are 3 biological machine learning projects in this directory. 
 
-# 1. Drug Repurposing Success Prediciton. 
+# 1. Drug Repurposing Success Prediciton 
 Using xgboost and available data from a previous study https://www.nature.com/articles/s41598-019-42806-6#data-availability, I beat the original reports AUC using XGBoost. This means my model had better predictive ability for picking drugs that would be succesfully repurposed.
 - Beat previous authors AUC of 0.922 by implementing XGBoost instead of Random Forest
 
-# 2. Predicting gestational Using RNAseq Data. 
+# 2. Predicting Gestational Age Using RNAseq Data (DREAM challenge) 
 This was part of a "DREAM" challenge hosted by Synapse. I worked on this group with fellow grad students in the biology department over the summer. The group write up can be viewed here https://github.com/jamesyoung93/Preterm-Dream-Challenge. I have also included my personal contributions in the files above. These contribution include 
 - Feature selection on ~ 900,000 features which were RNA probes (I used xgboost importance to retain only top features)
 - Modeling with XGBoost down to an RMSE of about ~4 in both train and test where response variable was the week of gestation (pregnancy)
